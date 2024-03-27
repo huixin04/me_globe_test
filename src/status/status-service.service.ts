@@ -1,9 +1,10 @@
 import { async } from '@angular/core/testing';
 import { Injectable } from '@angular/core';
-import { Observable, throwError, timer, of, from } from 'rxjs';
+import { Observable,  timer, of,forkJoin  } from 'rxjs';
 import { filter, catchError, concatMap, map } from 'rxjs/operators';
 import { HttpClient} from '@angular/common/http';
-import { LineBotService } from './line-notification.service';
+import{LineNotifyService}from'./line-notification.service';
+import { EmailService } from './email.service';
 
 @Injectable({
   providedIn: 'root',
@@ -16,7 +17,9 @@ export class StatusServiceService {
 
 
   constructor(private http: HttpClient,
-    private LineBotService:LineBotService) {}
+    private LineNotifyService:LineNotifyService,
+    // private emailService: EmailService
+    ) {}
 
  // 將使用者指定的時間儲存到本地存儲中
  saveUserScheduledTimes(scheduledTimes: { hours: number; minutes: number; seconds: number }[]): void {
@@ -41,26 +44,25 @@ setUserScheduledTime(hour: number, minute: number, second: number): void {
 
   //取得特定URL的HTTP狀態碼
 async generateStatusService():Promise<number>{
-  const url=`${this.baseUrl}`
+  const url=`${this.baseUrl}`// 設定要訪問的 URL，這裡使用了類中的 baseUrl 屬性
   try{
+    // 發送 HEAD 請求以獲取伺服器回應，並使用 toPromise() 將 Observable 轉換為 Promise
     const response = await this.http.head(url,{observe:'response'}).toPromise();
-    if(response){
-      return response.status;
+    if(response){// 如果有回應
+      return response.status; // 返回回應的狀態碼
     }else{
-      throw new Error('Response is undefined');
+      throw new Error('Response is undefined');// 拋出錯誤，指示回應為 undefined
     }
-  }catch(error:unknown){
-    if(error instanceof Error){
-      throw new Error('There was a problem with the fetch operaion'+error.message);
-    }else{
-      throw new Error('An unknown error occurred');
+  }catch(error:unknown){ // 捕獲可能的錯誤
+    if(error instanceof Error){// 如果是 Error 類型的錯誤
+      throw new Error('There was a problem with the fetch operaion'+error.message);// 拋出一般錯誤，包含錯誤訊息
+    }else{// 如果是其他類型的錯誤
+      throw new Error('An unknown error occurred');// 拋出未知錯誤
     }
   }
 
+
 }
-
-
-
 
 
   // StatusService(): Observable<any> {
@@ -70,14 +72,14 @@ async generateStatusService():Promise<number>{
   //     catchError((error) => {
   //       console.error('在 GET 請求期間發生錯誤:', error);
   //       // 在这里发送电子邮件通知
-  //       this.sendEmailNotification(error).subscribe(
-  //         (emailResponse) => {
-  //           console.log('郵件發送成功:', emailResponse);
-  //         },
-  //         (emailError) => {
-  //           console.error('郵件發送失敗:', emailError);
-  //         }
-  //       );
+  //       // this.sendEmailNotification(error).subscribe(
+  //       //   (emailResponse) => {
+  //       //     console.log('郵件發送成功:', emailResponse);
+  //       //   },
+  //       //   (emailError) => {
+  //       //     console.error('郵件發送失敗:', emailError);
+  //       //   }
+  //       // );
   //       // 發送 Line Notify 消息
   //       // this.sendLineNotifyMessage(`發生錯誤：${error.message}`).subscribe(
   //       //   () => console.log('Line Notify 消息發送成功。'),
@@ -89,37 +91,6 @@ async generateStatusService():Promise<number>{
   // }
 
 
-
-
-  // //寄送email通知
-  // private sendEmailNotification(error: any): Observable<any> {
-  //   const errorMessage = `發生錯誤: ${error.message}`;
-
-  //   //建構請求的body
-  //   const emailData = {
-  //     to: 'C110118236@nkust.edu.tw', // 收件人電子郵件
-  //     subject: '錯誤通知', // 郵件主题
-  //     body: errorMessage, // 郵件正文
-  //   };
-  //   //發送post請求
-  //   return this.http.post(this.baseUrl, emailData);
-  // }
-
-  // //line
-  // sendLineNotifyMessage(message: string): Observable<any> {
-  //   const headers = new HttpHeaders({
-  //     'Content-Type': 'application/x-www-form-urlencoded',
-  //     //使用存取權杖進行授權
-  //     Authorization: `Bearer ${this.lineAccessToken}`,
-  //     'Access-Control-Allow-Origin': '*', // 允許跨域請求
-  //     'Access-Control-Allow-Credentials': 'true', // 允許跨域請求包含 Cookie 或其他憑據
-  //   });
-
-  //   const body = new URLSearchParams();
-  //   body.set('message', message);
-
-  //   return this.http.post(this.lineNotifyUrl, body.toString(), { headers });
-  // }
 
   private shouldGenerateReport(): boolean {
     const currentDate = new Date();
@@ -190,21 +161,36 @@ getStatusService(): Observable<any> {
 
   // 計算距離下一分鐘的秒數
   const secondsUntilNextMinute = 60 - new Date().getSeconds();
+  // 創建一個 Observable，在下一分鐘開始時發出一個值，然後每分鐘發出一個值
   const timerObservable = timer(secondsUntilNextMinute * 1000, 60000);
 
   return timerObservable.pipe(
-    filter(() => this.shouldGenerateReport()),
-    concatMap(() => {
-      return from(this.generateStatusService()).pipe(
-        catchError((error) => {
-          console.error('在 generateStatusService 中發生錯誤:', error);
-          return of('Error occurred');
+    filter(() => this.shouldGenerateReport()),// 過濾器：檢查是否應該生成報告
+    // concatMap(() => {
+  //     return from(this.generateStatusService()).pipe(
+  //       catchError((error) => {
+  //         console.error('在 generateStatusService 中發生錯誤:', error);
+  //         return of('Error occurred');
 
 
-        })
-      );
-    })
-  );
+  //       })
+  //     );
+  //   })
+  // );
+
+    // 合併操作符：同時調用 generateStatusService() 和 checkServer() 方法
+  concatMap(() => {
+    return forkJoin({
+      status: this.generateStatusService(), // 調用生成狀態服務方法
+      serverCheck: this.checkServer()// 調用檢查伺服器方法
+    }).pipe(
+      catchError((error) => {// 捕獲錯誤，並返回一個 Observable
+        console.error('在 generateStatusService 或 checkServer 中發生錯誤:', error); // 輸出錯誤訊息到控制台
+        return of('Error occurred');// 返回一個包含錯誤訊息的 Observable
+      })
+    );
+  })
+);
 }
 
 
@@ -215,6 +201,48 @@ getStatusService(): Observable<any> {
     return this.http.get(url);
   }
 
+  async checkServer() {
+    let response; //定義變數存儲伺服器響應
+    let error; //定義變數存儲錯誤
+
+    //嘗試發送請求檢查伺服器狀態
+    try {
+      response = await this.generateStatusService();
+      console.log('訪問的網站正常，狀態碼:', response);
+      console.log('System status:', status);
+    //LINE告警
+      this.sendLineNotification('MeGlobe系統運行成功');
+
+      //如果發生錯誤，捕獲錯誤並記錄在 error 變數中
+    } catch (e) {
+      error = e instanceof Error ? e : new Error('未知錯誤');
+      console.error('訪問的網站發生錯誤:', error.message);
+      console.log('current time:' + new Date());
+     //LINE告警
+      this.sendLineNotification('MeGlobe系統運行失敗');
+       // Sending email notification
+      // const errorMessage = 'MeGlobe系統運行失敗'; // You can customize this message
+      // this.emailService.sendEmail('System Alert', errorMessage);
+    }
+  }
+
+   //LINE告警
+ sendLineNotification(message: string) {this.LineNotifyService.sendLineNotification(message)
+  .then(status => {
+    console.log('發送通知的狀態碼:', status);
+    // 在這裡可以根據 HTTP 狀態碼執行相應的操作
+    console.log('系統檢查結果已由Line Notify發送通知');
+  })
+  .catch(error => {
+    console.error('系統檢查結果通知失敗:', error);
+    // 處理發送通知失敗的情況
+    if (error instanceof Error) {
+      console.error('發送 Line Notify 通知時發生錯誤:', error.message);
+    } else {
+      console.error('未知的錯誤:', error);
+    }
+  });
+}
 
 
   // checkStatus(): Observable<any> {
